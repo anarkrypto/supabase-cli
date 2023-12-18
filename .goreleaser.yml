@@ -5,7 +5,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X github.com/supabase/cli/internal/utils.Version={{.Version}}
+      - -s -w -X github.com/supabase/cli/internal/utils.Version={{.Version}} -X github.com/supabase/cli/internal/utils.SentryDsn={{ .Env.SENTRY_DSN }}
     env:
       - CGO_ENABLED=0
     targets:

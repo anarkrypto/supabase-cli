@@ -3,7 +3,6 @@ package download
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
+	"github.com/go-errors/errors"
 	"github.com/spf13/afero"
 	"github.com/supabase/cli/internal/db/start"
 	"github.com/supabase/cli/internal/utils"
@@ -53,16 +53,16 @@ func RunLegacy(ctx context.Context, slug string, projectRef string, fsys afero.F
 func getFunctionMetadata(ctx context.Context, projectRef, slug string) (*api.FunctionSlugResponse, error) {
 	resp, err := utils.GetSupabase().GetFunctionWithResponse(ctx, projectRef, slug)
 	if err != nil {
-		return nil, err
+		return nil, errors.Errorf("failed to get function metadata: %w", err)
 	}
 
 	switch resp.StatusCode() {
 	case http.StatusNotFound:
-		return nil, errors.New("Function " + utils.Aqua(slug) + " does not exist on the Supabase project.")
+		return nil, errors.Errorf("Function %s does not exist on the Supabase project.", utils.Aqua(slug))
 	case http.StatusOK:
 		break
 	default:
-		return nil, errors.New("Failed to download Function " + utils.Aqua(slug) + " on the Supabase project: " + string(resp.Body))
+		return nil, errors.Errorf("Failed to download Function %s on the Supabase project: %s", utils.Aqua(slug), string(resp.Body))
 	}
 
 	if resp.JSON200.EntrypointPath == nil {
@@ -88,7 +88,7 @@ func downloadFunction(ctx context.Context, projectRef, slug, extractScriptPath s
 
 	resp, err := utils.GetSupabase().GetFunctionBodyWithResponse(ctx, projectRef, slug)
 	if err != nil {
-		return err
+		return errors.Errorf("failed to get function body: %w", err)
 	}
 	if resp.StatusCode() != http.StatusOK {
 		return errors.New("Unexpected error downloading Function: " + string(resp.Body))
@@ -103,7 +103,7 @@ func downloadFunction(ctx context.Context, projectRef, slug, extractScriptPath s
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("Error downloading function: %w\n%v", err, errBuf.String())
+		return errors.Errorf("Error downloading function: %w\n%v", err, errBuf.String())
 	}
 	return nil
 }
@@ -140,7 +140,7 @@ func downloadOne(ctx context.Context, slug string, projectRef string, fsys afero
 	fmt.Println("Downloading " + utils.Bold(slug))
 	resp, err := utils.GetSupabase().GetFunctionBodyWithResponse(ctx, projectRef, slug)
 	if err != nil {
-		return "", err
+		return "", errors.Errorf("failed to get function body: %w", err)
 	}
 	if resp.StatusCode() != http.StatusOK {
 		return "", errors.New("Unexpected error downloading Function: " + string(resp.Body))
@@ -149,19 +149,21 @@ func downloadOne(ctx context.Context, slug string, projectRef string, fsys afero
 	// Create temp file to store downloaded eszip
 	eszipFile, err := afero.TempFile(fsys, "", slug)
 	if err != nil {
-		return "", err
+		return "", errors.Errorf("failed to create temporary file: %w", err)
 	}
 	defer eszipFile.Close()
 
 	body := bytes.NewReader(resp.Body)
-	_, err = io.Copy(eszipFile, body)
-	return eszipFile.Name(), err
+	if _, err = io.Copy(eszipFile, body); err != nil {
+		return "", errors.Errorf("failed to download file: %w", err)
+	}
+	return eszipFile.Name(), nil
 }
 
 func extractOne(ctx context.Context, hostEszipPath string) error {
 	hostFuncDirPath, err := filepath.Abs(utils.FunctionsDir)
 	if err != nil {
-		return err
+		return errors.Errorf("failed to resolve absolute path: %w", err)
 	}
 
 	dockerEszipPath := path.Join(dockerEszipDir, filepath.Base(hostEszipPath))
